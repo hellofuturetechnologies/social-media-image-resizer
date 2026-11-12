@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Crop, resize and download social media images locally in your browser.">
+<title>Social Media Image Resizer | Hello Future Technologies</title>
+<style>
+:root{color-scheme:light;--navy:#10233f;--ink:#14263b;--muted:#526479;--line:#dce4ee;--blue:#144dcc}*{box-sizing:border-box}body{margin:0;background:#f2f6fb;color:var(--ink);font:16px/1.55 "Instrument Sans",system-ui,sans-serif}header{background:var(--navy);color:white;padding:24px max(22px,calc((100vw - 1060px)/2)) 72px}header a{color:#dce9ff;text-decoration:none;font-weight:650}h1{font-size:clamp(2.25rem,6vw,3.85rem);letter-spacing:-.06em;line-height:1.06;margin:28px 0 12px}header p{color:#d2def0;margin:0;max-width:640px}main{max-width:1104px;margin:-34px auto 0;padding:0 22px 38px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}section{background:white;border:1px solid var(--line);border-radius:16px;padding:22px;min-width:0;box-shadow:0 12px 36px #1832520a}h2{font-size:1.2rem;margin:0 0 14px}p{margin:0 0 10px}.hint,footer,#status{color:var(--muted);font-size:.88rem}.field{margin-bottom:13px}label{display:block;font-weight:650;margin-bottom:5px}input,select,button{font:inherit;border:1px solid #aebdce;border-radius:8px;background:white;color:var(--ink);padding:8px 10px}input,select{width:100%;min-width:0}.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}button{font-weight:650;cursor:pointer;background:#f4f8ff;color:#173e91}button.primary{color:white;background:var(--blue);border-color:var(--blue)}button:disabled{opacity:.55;cursor:default}:focus-visible{outline:3px solid #5386f0;outline-offset:2px}#preview{border:1px dashed #b8c8dc;border-radius:12px;min-height:200px;display:grid;place-items:center;padding:12px;background:#f7faff}canvas{max-width:100%;max-height:440px;object-fit:contain;width:auto;height:auto;background:repeating-conic-gradient(#eef2f7 0% 25%,#fff 0% 50%) 50%/16px 16px}#status[data-error=true]{color:#a1272c}#status{min-height:1.35em;margin:6px 0 0}footer{text-align:center;padding:0 22px 26px}@media(max-width:730px){main{grid-template-columns:1fr;padding-inline:14px}section{padding:17px}}
+</style>
+</head>
+<body>
+<header><a href="https://hellofuturetechnology.com/">Hello Future Technologies</a><h1>Social Media Image Resizer</h1><p>Resize an image for a post, story, or thumbnail. Choose a preset or enter your own dimensions.</p></header>
+<main>
+<section aria-labelledby="settings">
+<h2 id="settings">Image settings</h2>
+<form id="controls">
+<div class="field"><label for="file">Source image</label><input id="file" type="file" accept="image/png,image/jpeg,image/webp" aria-describedby="file-help"><p id="file-help" class="hint">PNG, JPEG, or WebP up to 20 MiB.</p></div>
+<div class="field"><label for="preset">Size preset</label><select id="preset"><option value="1080x1080">Square post · 1080 × 1080</option><option value="1080x1350">Portrait post · 1080 × 1350</option><option value="1080x1920">Story or reel · 1080 × 1920</option><option value="1280x720">Landscape thumbnail · 1280 × 720</option><option value="1200x630">Link preview · 1200 × 630</option><option value="custom">Custom</option></select></div>
+<div class="pair"><div class="field"><label for="width">Width (px)</label><input id="width" type="number" min="1" max="4096" step="1" required value="1080"></div><div class="field"><label for="height">Height (px)</label><input id="height" type="number" min="1" max="4096" step="1" required value="1080"></div></div>
+<div class="pair"><div class="field"><label for="fit">Fit</label><select id="fit"><option value="cover">Fill with centered crop</option><option value="contain">Fit entire image</option></select></div><div class="field"><label for="format">Format</label><select id="format"><option value="image/png">PNG</option><option value="image/jpeg">JPEG</option><option value="image/webp">WebP</option></select></div></div>
+<p class="hint">Fit preserves the entire image and pads any unused space. JPEG uses white padding.</p>
+<div class="actions"><button type="button" id="example">Load example</button></div>
+</form>
+</section>
+<section aria-labelledby="result">
+<h2 id="result">Output preview</h2>
+<div id="preview"><p id="empty" class="hint">Choose an image to see the result.</p><canvas id="canvas" aria-label="Resized image preview" hidden></canvas></div>
+<div class="actions"><button id="download" class="primary" type="button" disabled>Download image</button></div>
+<p id="status" role="status" aria-live="polite"></p>
+</section>
+</main><footer>Images are processed locally in your browser.</footer>
+<script>
+'use strict';
+const get = id => document.getElementById(id);
+const canvas = get('canvas');
+const controls = get('controls');
+let source = null;
+let name = 'image';
+let loadId = 0;
+let revision = 0;
+
+function placement(sw, sh, width, height, fit) {
+  const scale = (fit === 'cover' ? Math.max : Math.min)(width / sw, height / sh);
+  const w = sw * scale, h = sh * scale;
+  return [(width - w) / 2, (height - h) / 2, w, h];
+}
+
+function status(message, error = false) {
+  get('status').textContent = message;
+  get('status').dataset.error = error;
+}
+function render() {
+  revision++;
+  const width = get('width').valueAsNumber, height = get('height').valueAsNumber;
+  const ready = source && controls.checkValidity();
+  canvas.hidden = !ready;
+  get('empty').hidden = !!ready;
+  get('download').disabled = !ready;
+  if (!ready) {
+    if (source) status('Enter whole-number dimensions from 1 to 4096 pixels.', true);
+    return;
+  }
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (get('format').value === 'image/jpeg') {
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, width, height);
+  }
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(source, ...placement(source.naturalWidth || source.width, source.naturalHeight || source.height, width, height, get('fit').value));
+  status(width + ' × ' + height + ' px ready to download.');
+}
+
+get('file').addEventListener('change', async () => {
+  const id = ++loadId;
+  const file = get('file').files[0];
+  source = null;
+  render();
+  if (!file) { status(''); return; }
+  if (file.size > 20 * 1024 * 1024) { status('Choose a file no larger than 20 MiB.', true); return; }
+  const url = URL.createObjectURL(file);
+  try {
+    status('Reading image…');
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    if (id !== loadId) return;
+    if (!image.naturalWidth || !image.naturalHeight) throw new Error();
+    source = image;
+    name = file.name.replace(/\.[^.]+$/, '') || 'image';
+    render();
+  } catch {
+    if (id === loadId) status('This image could not be opened. Try a PNG, JPEG, or WebP file.', true);
+  } finally { URL.revokeObjectURL(url); }
+});
+
+get('preset').addEventListener('change', () => {
+  if (get('preset').value !== 'custom') {
+    const [width, height] = get('preset').value.split('x');
+    get('width').value = width;
+    get('height').value = height;
+  }
+  render();
+});
+for (const id of ['width', 'height']) get(id).addEventListener('input', () => {
+  get('preset').value = 'custom';
+  render();
+});
+for (const id of ['fit', 'format']) get(id).addEventListener('change', render);
+controls.addEventListener('submit', event => event.preventDefault());
+
+get('example').addEventListener('click', () => {
+  loadId++;
+  get('file').value = '';
+  const sample = document.createElement('canvas');
+  sample.width = 1200; sample.height = 800;
+  const ctx = sample.getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 1200, 800);
+  gradient.addColorStop(0, '#124e88'); gradient.addColorStop(1, '#30a998');
+  ctx.fillStyle = gradient; ctx.fillRect(0, 0, 1200, 800);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 88px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('Hello Future', 600, 400);
+  source = sample;
+  name = 'example';
+  render();
+});
+
+get('download').addEventListener('click', () => {
+  const activeRevision = revision;
+  const type = get('format').value;
+  const extensions = {'image/png':'png','image/jpeg':'jpg','image/webp':'webp'};
+  const filename = name + '-' + canvas.width + 'x' + canvas.height;
+  get('download').disabled = true;
+  canvas.toBlob(blob => {
+    if (activeRevision !== revision) return;
+    get('download').disabled = false;
+    if (!blob || !extensions[blob.type]) { status('The image could not be exported.', true); return; }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename + '.' + extensions[blob.type];
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    status(blob.type === type ? 'Image download started.' : 'Your browser exported a PNG because the selected format is unavailable.');
+  }, type, 0.92);
+});
+</script>
+</body>
+</html>
